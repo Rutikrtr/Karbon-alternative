@@ -14,7 +14,27 @@ npm run dev:server                   # API on :4000 (seeds demo data on first ru
 npm run dev:client                   # UI on :5173
 ```
 
-Demo accounts (password `demo1234`): `owner@` (Super Admin), `anita@` / `rahul@` / `sneha@` (Admin/TL),
+## First login on a real database
+
+1. In `server/.env` set `MONGODB_URI` (e.g. MongoDB Atlas), a long random `JWT_SECRET`, and
+   `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (8+ characters). Keep `SEED_DEMO=false`.
+2. Start the server. On an empty database it creates that person as the first **Super Admin**.
+   Then remove `ADMIN_PASSWORD` from `.env`.
+3. Sign in, then from the app: **Teams** → create teams → **People** → add Admins and Employees →
+   add them to teams (choose a Lead) → **Clients** → create clients and assign teams/admins →
+   on each client, **Grant** access to employees.
+
+Locked out, or need another Super Admin? Run from `server/`:
+
+```bash
+npm run create-admin -- --email you@firm.com --name "Your Name" --password "a-strong-password"
+```
+
+It creates the user, or promotes an existing one and resets their password.
+
+## Demo data
+
+Set `SEED_DEMO=true` to fill an empty database with demo data. Demo accounts (password `demo1234`): `owner@` (Super Admin), `anita@` / `rahul@` / `sneha@` (Admin/TL),
 `amit@`, `neha@`, `karan@`, `pooja@` (Employees) — all `@demo.test`. Buttons on the login screen sign in directly.
 
 ## Access model
