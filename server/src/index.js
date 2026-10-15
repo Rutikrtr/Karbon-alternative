@@ -33,6 +33,7 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/config', (_req, res) => res.json({ demo: process.env.SEED_DEMO === 'true' }));
 app.use('/api/auth', authRoutes);
 app.use('/api', requireAuth, peopleRoutes, clientRoutes, workRoutes);
 

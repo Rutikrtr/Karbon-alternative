@@ -264,6 +264,7 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const config = useApi('/config');
   const go = async (e, p = password, em = email) => {
     e?.preventDefault(); setBusy(true); setError(null);
     try { await login(em, p); } catch (err) { setError(err); setBusy(false); }
@@ -277,7 +278,7 @@ export function Login() {
           <p>Built for accounting practices where people work across several teams, and every client’s data stays private.</p>
         </div>
         <div className="hero-points">
-          <div><Users size={20} />One login across Team A, B and C</div>
+          <div><Users size={20} />One login across all your teams</div>
           <div><Lock size={20} />Client access is granted explicitly, never by team alone</div>
           <div><Repeat size={20} />Recurring work with SOPs and checklists</div>
         </div>
@@ -291,7 +292,7 @@ export function Login() {
             <Field label="Password"><input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
             <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
-          <div>
+          {config.data?.demo && <div>
             <div className="row" style={{ margin: '4px 0 10px' }}><Building2 size={14} className="muted" /><span className="small muted">Demo accounts — try each role</span></div>
             <div className="demo-grid">
               {DEMO.map(([em, name, role]) => (
@@ -300,7 +301,7 @@ export function Login() {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
       </section>
     </div>
