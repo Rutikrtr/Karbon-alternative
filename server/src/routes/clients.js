@@ -3,7 +3,7 @@ import { Client, ClientAssignment, ClientPermission, AccessRequest, User, Task }
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import {
   audit, isSuper, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
-  canGrantDirectly, activePermissionFilter,
+  canGrantDirectly, activePermissionFilter, teamLeads,
 } from '../services/access.js';
 
 const r = Router();
@@ -19,14 +19,23 @@ r.get('/clients', ah(async (req, res) => {
     { $group: { _id: '$client', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ['$dueDate', new Date()] }, 1, 0] } } } },
   ]);
   const counts = Object.fromEntries(openCounts.map((c) => [String(c._id), c]));
-  res.json(clients.map((c) => ({
+  const leads = await teamLeads(assignments.filter((a) => a.team).map((a) => a.team._id));
+  res.json(clients.map((c) => {
+    const mine = assignments.filter((a) => String(a.client) === String(c._id));
+    const managers = new Map();
+    for (const a of mine) {
+      const u = a.admin || (a.team && leads[String(a.team._id)]);
+      if (u) managers.set(String(u._id), { _id: u._id, name: u.name });
+    }
+    return {
     ...c,
-    teams: assignments.filter((a) => String(a.client) === String(c._id) && a.team).map((a) => a.team),
-    admins: assignments.filter((a) => String(a.client) === String(c._id) && a.admin).map((a) => a.admin),
+    teams: mine.filter((a) => a.team).map((a) => ({ ...a.team, lead: leads[String(a.team._id)] || null })),
+    admins: [...managers.values()],
     openTasks: counts[c._id]?.open || 0,
     overdueTasks: counts[c._id]?.overdue || 0,
     canManage: managed === null || managed.includes(String(c._id)),
-  })));
+    };
+  }));
 }));
 
 r.post('/clients', requireRole('super_admin'), ah(async (req, res) => {
@@ -55,9 +64,10 @@ r.get('/clients/:id', ah(async (req, res) => {
   const requests = manage
     ? await AccessRequest.find({ client: client._id, status: 'pending' }).populate('user', 'name').populate('requestedBy', 'name').lean()
     : [];
+  const leads = await teamLeads(assignments.filter((a) => a.team).map((a) => a.team._id));
   res.json({
     ...client,
-    teams: assignments.filter((a) => a.team).map((a) => ({ ...a.team, assignmentId: a._id })),
+    teams: assignments.filter((a) => a.team).map((a) => ({ ...a.team, assignmentId: a._id, lead: leads[String(a.team._id)] || null })),
     admins: assignments.filter((a) => a.admin).map((a) => ({ ...a.admin, assignmentId: a._id })),
     permissions, requests, canManage: manage, isSuper: isSuper(req.user),
   });

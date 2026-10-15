@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarClock, AlertTriangle, CalendarRange, Plus, Search, Users, Clock } from 'lucide-react';
+import { CalendarClock, AlertTriangle, CalendarRange, Plus, Search, Users, Clock, CheckCircle2 } from 'lucide-react';
 import { useApi, useAuth, dueInfo, STATUS, fmtDate } from '../lib.jsx';
 import { Avatar, Badge, Empty, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, useTaskToggle } from '../tasks.jsx';
@@ -19,16 +19,20 @@ function Stat({ icon: Icon, label, value, tone, selected, onClick }) {
 
 /* ---------- My work (every role) ---------- */
 
+const RECENT_DONE_DAYS = 7;
+const recentlyDone = (t) => t.status === 'done' && Date.now() - new Date(t.completedAt || t.updatedAt) < RECENT_DONE_DAYS * 864e5;
+
 export function MyWork() {
   const { user, can } = useAuth();
-  const [bucket, setBucket] = useState('open');
+  // TLs land on their team's work; everyone can switch to just their own tasks
+  const [view, setView] = useState(() => (can.manage ? 'team' : 'mine'));
+  const [bucket, setBucket] = useState('active');
   const [team, setTeam] = useState('');
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
-  const dash = useApi('/dashboard');
-  const tasks = useApi('/tasks?scope=mine');
-  const reload = () => { tasks.reload(); dash.reload(); };
+  const tasks = useApi(`/tasks?scope=${view === 'team' ? 'all' : 'mine'}`, [view]);
+  const reload = () => tasks.reload();
   const toggle = useTaskToggle(reload);
 
   const teams = useMemo(() => {
@@ -37,26 +41,35 @@ export function MyWork() {
 
   const filtered = (tasks.data || []).filter((t) => {
     const b = dueInfo(t).bucket;
-    if (bucket === 'open' && b === 'done') return false;
-    if (bucket !== 'open' && bucket !== 'all' && b !== bucket) return false;
+    // Completed work stays visible for a week so nobody wonders where it went
+    if (bucket === 'active' && b === 'done' && !recentlyDone(t)) return false;
+    if (bucket !== 'active' && bucket !== 'all' && b !== bucket) return false;
     if (team && t.team?._id !== team) return false;
     if (q && !`${t.title} ${t.client?.name}`.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
-  const m = dash.data?.mine;
+  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (!team || t.team?._id === team)).length : undefined);
+  const m = { dueToday: count('today'), overdue: count('overdue'), upcoming: count('upcoming'), done: (tasks.data || []).filter(recentlyDone).length };
   const hour = new Date().getHours();
-  const pick = (b) => setBucket((cur) => (cur === b ? 'open' : b));
+  const pick = (b) => setBucket((cur) => (cur === b ? 'active' : b));
 
   return (
     <>
       <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' · ').pop().split(' ')[0]}`}
-        subtitle="Everything assigned to you, across all your teams, in one place.">
+        subtitle={view === 'team' ? 'All work for your team’s clients — who is doing what, and how far they are.' : 'Everything assigned to you, across all your teams, in one place.'}>
+        {can.manage && (
+          <div className="chips" role="tablist" aria-label="Whose work">
+            <button className={`chip ${view === 'team' ? 'on' : ''}`} role="tab" aria-selected={view === 'team'} onClick={() => setView('team')}><Users size={16} />Team work</button>
+            <button className={`chip ${view === 'mine' ? 'on' : ''}`} role="tab" aria-selected={view === 'mine'} onClick={() => setView('mine')}>Assigned to me</button>
+          </div>
+        )}
         {can.manage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
-      <div className="grid grid-3" style={{ marginBottom: 24 }}>
+      <div className="grid grid-4" style={{ marginBottom: 24 }}>
         <Stat icon={CalendarClock} label="Due today" value={m?.dueToday} tone="warning" selected={bucket === 'today'} onClick={() => pick('today')} />
         <Stat icon={AlertTriangle} label="Overdue" value={m?.overdue} tone="danger" selected={bucket === 'overdue'} onClick={() => pick('overdue')} />
         <Stat icon={CalendarRange} label="Upcoming" value={m?.upcoming} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
+        <Stat icon={CheckCircle2} label={`Done · last ${RECENT_DONE_DAYS} days`} value={tasks.data ? m.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
       </div>
       <div className="row-wrap" style={{ marginBottom: 16 }}>
         <div className="chips">
@@ -69,12 +82,12 @@ export function MyWork() {
         </div>
         <div className="spacer" />
         <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Show">
-          <option value="open">Open tasks</option><option value="today">Due today</option><option value="overdue">Overdue</option>
+          <option value="active">Open + recently done</option><option value="today">Due today</option><option value="overdue">Overdue</option>
           <option value="upcoming">Upcoming</option><option value="done">Completed</option><option value="all">All</option>
         </select>
         <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks or clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tasks" /></div>
       </div>
-      <TaskListCard tasks={filtered} loading={tasks.loading} onOpen={(t) => setOpenId(t._id)} onToggle={toggle}
+      <TaskListCard tasks={filtered} loading={tasks.loading} showPeople={view === 'team'} onOpen={(t) => setOpenId(t._id)} onToggle={toggle}
         emptyTitle={bucket === 'overdue' ? 'Nothing overdue — nice work' : 'No tasks match'} />
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
       {creating && <TaskForm onClose={() => setCreating(false)} onSaved={reload} />}

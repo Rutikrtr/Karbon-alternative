@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2 } from 'lucide-react';
-import { api, useApi, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
+import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
 import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, TeamTag, ErrorBox } from './ui.jsx';
 
 /* ---------- List ---------- */
 
-export function TaskRow({ task, onOpen, onToggle }) {
+export function TaskRow({ task, onOpen, onToggle, showPeople }) {
   const due = dueInfo(task);
   const doneCount = task.checklist?.filter((c) => c.done).length || 0;
   return (
@@ -23,7 +23,12 @@ export function TaskRow({ task, onOpen, onToggle }) {
           <span>{task.client?.name}</span>
           {task.team && <><span>·</span><TeamTag team={task.team} /></>}
           {task.checklist?.length > 0 && <><span>·</span><span className="mono">{doneCount}/{task.checklist.length} steps</span></>}
+          {showPeople && <><span>·</span><span>{task.assignees.map((a) => a.name).join(', ') || 'Unassigned'}</span></>}
+          {task.status === 'done' && task.completedBy && <><span>·</span><span style={{ color: 'var(--success)' }}>Done by {task.completedBy.name}</span></>}
         </div>
+        {showPeople && task.checklist?.length > 0 && task.status !== 'done' && (
+          <div className="bar" style={{ height: 4, marginTop: 6, maxWidth: 220 }}><span style={{ width: `${(doneCount / task.checklist.length) * 100}%`, background: 'var(--success)' }} /></div>
+        )}
       </div>
       {task.priority === 'high' && <Flag size={16} color="var(--danger)" aria-label="High priority" />}
       {task.status !== 'todo' && task.status !== 'done' && <StatusBadge status={task.status} />}
@@ -161,10 +166,25 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
+  const { user } = useAuth();
+  const [everyone, setEveryone] = useState(false);
   const manageable = (clients.data || []).filter((c) => c.canManage);
   const client = manageable.find((c) => c._id === f.client);
   const clientTeamIds = new Set((client?.teams || []).map((t) => t._id));
-  const people = useMemo(() => (users.data || []).filter((u) => u.active && u.role !== 'super_admin'), [users.data]);
+
+  // Choose the client's team automatically — the one I lead if the client has several
+  const pickTeam = (c) => {
+    const ts = c?.teams || [];
+    return (ts.find((t) => String(t.lead?._id) === String(user._id)) || ts[0])?._id || '';
+  };
+  useEffect(() => {
+    if (client && !f.team) setF((s) => ({ ...s, team: pickTeam(client) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client?._id]);
+
+  const allPeople = useMemo(() => (users.data || []).filter((u) => u.active && u.role !== 'super_admin'), [users.data]);
+  const teamPeople = allPeople.filter((u) => u.teams.some((t) => t.team._id === f.team));
+  const people = f.team && !everyone ? teamPeople : allPeople;
 
   const toggleAssignee = (id) => setF((s) => {
     const assignees = s.assignees.includes(id) ? s.assignees.filter((x) => x !== id) : [...s.assignees, id];
@@ -197,7 +217,7 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
         <div className="grid grid-2">
           <Field label="Client">
-            <select className="select" value={f.client} onChange={(e) => setF((s) => ({ ...s, client: e.target.value, team: '' }))} required>
+            <select className="select" value={f.client} onChange={(e) => { const c = manageable.find((x) => x._id === e.target.value); setF((s) => ({ ...s, client: e.target.value, team: pickTeam(c) })); }} required>
               <option value="">Select client…</option>
               {manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
             </select>
@@ -225,7 +245,7 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
             <Field label="Priority"><select className="select" value={f.priority} onChange={set('priority')}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></Field>
           </div>
         )}
-        <Field label="Assign to" hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'Only people with access to this client can be assigned.'}>
+        <Field label={f.team && !everyone ? 'Assign to (team members)' : 'Assign to'} hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'They get access to this client automatically.'}>
           <div className="chips">
             {people.map((p) => {
               const on = f.assignees.includes(p._id);
@@ -240,6 +260,8 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
                 </span>
               );
             })}
+            {f.team && people.length === 0 && <span className="small muted">This team has no members yet. Add them on the Teams page.</span>}
+            {f.team && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEveryone((v) => !v)}>{everyone ? 'Only team members' : 'Show everyone'}</button>}
           </div>
         </Field>
         <Field label="SOP / instructions"><textarea className="textarea" value={f.sop} onChange={set('sop')} placeholder={'1. Open the inbox\n2. Enter bills in Xero\n3. …'} /></Field>
@@ -261,18 +283,18 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
   );
 }
 
-export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, emptyTitle = 'Nothing here' }) {
+export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, showPeople, emptyTitle = 'Nothing here' }) {
   if (loading && !tasks) return <div className="card"><Skeleton /></div>;
   if (!tasks?.length) return <div className="card"><Empty icon={ListChecks} title={emptyTitle} /></div>;
-  if (!groups) return <div className="card list">{tasks.map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} />)}</div>;
-  const order = [['overdue', 'Overdue'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['done', 'Completed']];
+  if (!groups) return <div className="card list">{tasks.map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} />)}</div>;
+  const order = [['overdue', 'Overdue'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['done', 'Recently completed']];
   const by = Object.groupBy ? Object.groupBy(tasks, (t) => dueInfo(t).bucket) : tasks.reduce((a, t) => ((a[dueInfo(t).bucket] ||= []).push(t), a), {});
   return (
     <div className="card list" style={{ overflow: 'hidden' }}>
       {order.filter(([k]) => by[k]?.length).map(([k, label]) => (
         <div key={k}>
           <div className="group-label"><span>{label}</span><span className="mono">{by[k].length}</span></div>
-          {by[k].map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} />)}
+          {by[k].map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} />)}
         </div>
       ))}
     </div>

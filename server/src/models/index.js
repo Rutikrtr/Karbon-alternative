@@ -12,6 +12,7 @@ export const User = model('User', new Schema({
   role: { type: String, enum: ['super_admin', 'admin', 'employee'], default: 'employee' },
   title: String,
   active: { type: Boolean, default: true },
+  deletedAt: Date, // removed people keep their name on past tasks and logs
 }, opts));
 
 export const Team = model('Team', new Schema({
@@ -127,11 +128,13 @@ taskSchema.index({ template: 1, dueDate: 1 }, { unique: true, partialFilterExpre
 taskSchema.index({ assignees: 1, dueDate: 1 });
 export const Task = model('Task', taskSchema);
 
-export const AuditLog = model('AuditLog', new Schema({
+const auditSchema = new Schema({
   actor: ref('User'),
   action: { type: String, required: true },
   entity: String,
   entityId: Types.ObjectId,
   client: ref('Client'),
   summary: String,
-}, { timestamps: { createdAt: true, updatedAt: false } }), 'audit_logs');
+}, { timestamps: { createdAt: true, updatedAt: false } });
+auditSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }); // auto-delete after 30 days
+export const AuditLog = model('AuditLog', auditSchema, 'audit_logs');

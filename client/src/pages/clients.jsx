@@ -24,7 +24,7 @@ export function Clients() {
       <div className="card" style={{ overflow: 'hidden' }}>
         {loading && !data ? <Skeleton /> : rows.length === 0 ? <Empty icon={Building2} title="No clients" >Ask your admin for access to a client.</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Client</th><th>Teams</th><th>Managed by</th><th>Open work</th><th>Status</th></tr></thead>
+            <thead><tr><th>Client</th><th>Team</th><th>TL / managers</th><th>Open work</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c._id} className="clickable" onClick={() => nav(`/clients/${c._id}`)}>
@@ -69,10 +69,10 @@ function ClientForm({ onClose, onSaved }) {
           <Field label="Contact name"><input className="input" value={f.contactName} onChange={set('contactName')} /></Field>
           <Field label="Contact email"><input className="input" type="email" value={f.contactEmail} onChange={set('contactEmail')} /></Field>
         </div>
-        <Field label="Managing teams"><div className="chips">{(teams.data || []).map((t) => (
+        <Field label="Team" hint="The team’s TL manages this client and assigns its work."><div className="chips">{(teams.data || []).map((t) => (
           <button type="button" key={t._id} className={`chip ${f.teamIds.includes(t._id) ? 'on' : ''}`} onClick={() => toggle('teamIds', t._id)}><span className="team-dot" style={{ background: t.color }} />{t.name}</button>
         ))}</div></Field>
-        <Field label="Managing admins" hint="Admins see and manage everything for this client. Employees need access granted separately."><div className="chips">{(users.data || []).filter((u) => u.role === 'admin').map((u) => (
+        <Field label="Extra managers (optional)" hint="Only if another Admin / TL should also manage this client."><div className="chips">{(users.data || []).filter((u) => u.role === 'admin').map((u) => (
           <button type="button" key={u._id} className={`chip ${f.adminIds.includes(u._id) ? 'on' : ''}`} onClick={() => toggle('adminIds', u._id)} style={{ paddingLeft: 4 }}><Avatar name={u.name} size="sm" />{u.name}</button>
         ))}</div></Field>
       </form>
@@ -128,12 +128,12 @@ export function ClientDetail() {
             {c.contactPhone && <div className="row small"><Phone size={16} className="muted" />{c.contactPhone}</div>}
           </div>
           <div className="card">
-            <div className="card-head"><h3>Managed by</h3>{c.isSuper && <button className="btn btn-tonal btn-sm" onClick={() => setAssigning(true)}><Plus size={16} />Assign</button>}</div>
+            <div className="card-head"><h3>Team & managers</h3>{c.isSuper && <button className="btn btn-tonal btn-sm" onClick={() => setAssigning(true)}><Plus size={16} />Assign</button>}</div>
             <div className="list">
-              {[...c.admins.map((a) => ({ ...a, kind: 'admin' })), ...c.teams.map((t) => ({ ...t, kind: 'team' }))].map((a) => (
+              {[...c.teams.map((t) => ({ ...t, kind: 'team' })), ...c.admins.map((a) => ({ ...a, kind: 'admin' }))].map((a) => (
                 <div key={a.assignmentId} className="list-item" style={{ cursor: 'default' }}>
                   {a.kind === 'admin' ? <Avatar name={a.name} size="sm" /> : <span className="team-dot" style={{ background: a.color, margin: '0 8px' }} />}
-                  <div className="li-main"><div className="title">{a.name}</div><div className="li-meta">{a.kind === 'admin' ? 'Admin / TL' : 'Team'}</div></div>
+                  <div className="li-main"><div className="title">{a.name}</div><div className="li-meta">{a.kind === 'admin' ? 'Extra manager' : a.lead ? `Team · TL ${a.lead.name}` : 'Team · no TL yet'}</div></div>
                   {c.isSuper && <button className="btn btn-ghost icon-btn" aria-label={`Unassign ${a.name}`} onClick={() => unassign(a)}><X size={16} /></button>}
                 </div>
               ))}
@@ -141,7 +141,7 @@ export function ClientDetail() {
           </div>
           {c.canManage && (
             <div className="card">
-              <div className="card-head"><div><h3>People with access</h3><p className="small muted">Team membership alone does not grant access.</p></div>
+              <div className="card-head"><div><h3>People with access</h3><p className="small muted">People get access automatically when their TL assigns them work here.</p></div>
                 <button className="btn btn-tonal btn-sm" onClick={() => setGranting(true)}><UserPlus size={16} />Grant</button></div>
               {c.permissions.length === 0 ? <p className="small muted" style={{ padding: 20 }}>No employees have access yet.</p> : (
                 <div className="list">{c.permissions.map((p) => (
@@ -221,7 +221,7 @@ function AssignManager({ client, onClose, onSaved }) {
       <Field label="Add a team"><div className="chips">{(teams.data || []).filter((t) => !hasTeam.has(t._id)).map((t) => (
         <button key={t._id} className="chip" onClick={() => assign({ teamId: t._id })}><span className="team-dot" style={{ background: t.color }} />{t.name}</button>
       ))}</div></Field>
-      <Field label="Add an admin" hint="One client can be managed by several admins."><div className="chips">{(users.data || []).filter((u) => u.role !== 'employee' && !hasAdmin.has(u._id)).map((u) => (
+      <Field label="Add an extra manager" hint="The team’s TL already manages the client. Add someone here only if another Admin / TL should too."><div className="chips">{(users.data || []).filter((u) => u.role !== 'employee' && !hasAdmin.has(u._id)).map((u) => (
         <button key={u._id} className="chip" style={{ paddingLeft: 4 }} onClick={() => assign({ adminId: u._id })}><Avatar name={u.name} size="sm" />{u.name}<span className="muted small">{ROLE_LABEL[u.role]}</span></button>
       ))}</div></Field>
     </Modal>

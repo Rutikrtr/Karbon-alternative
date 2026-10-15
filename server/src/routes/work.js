@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { Task, TaskTemplate, AuditLog, User, ClientPermission } from '../models/index.js';
+import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter,
+  audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 
@@ -10,12 +10,21 @@ const r = Router();
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
   .populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
 
-/** Assignees must be able to see the client, otherwise they'd get a task they can't open. */
-async function assertAssignable(clientId, userIds = []) {
+/**
+ * Assignees must be able to see the client. If the person assigning is allowed to grant
+ * access to them (their TL, or a Super Admin), access is granted automatically.
+ */
+async function assertAssignable(actor, clientId, userIds = []) {
   for (const id of userIds) {
-    const u = await User.findById(id);
+    const u = await User.findOne({ _id: id, deletedAt: null, active: true });
     if (!u) throw new HttpError(400, 'Unknown assignee');
-    if (!(await canSeeClient(u, clientId))) throw new HttpError(400, `${u.name} has no access to this client yet. Grant access first.`);
+    if (await canSeeClient(u, clientId)) continue;
+    if (!(await canGrantDirectly(actor, clientId, u._id))) {
+      throw new HttpError(400, `${u.name} is not in your team and has no access to this client. Ask a Super Admin to grant access first.`);
+    }
+    const perm = await ClientPermission.create({ client: clientId, user: u._id, grantedBy: actor._id });
+    const client = await Client.findById(clientId).select('name');
+    audit(actor, 'access.grant', { entity: 'ClientPermission', entityId: perm._id, client: clientId, summary: `Gave ${u.name} access to ${client?.name} (assigned work)` });
   }
 }
 
@@ -45,7 +54,7 @@ r.post('/tasks', ah(async (req, res) => {
   const { title, client, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = req.body || {};
   if (!title || !client || !dueDate) throw new HttpError(400, 'Title, client and due date are required');
   if (!(await canManageClient(req.user, client))) throw new HttpError(403, 'You can only create work for clients you manage');
-  await assertAssignable(client, assignees);
+  await assertAssignable(req.user, client, assignees);
   const task = await Task.create({
     title, client, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
     checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
@@ -82,7 +91,7 @@ r.patch('/tasks/:id', ah(async (req, res) => {
       if (body[k] !== undefined) { task[k] = body[k] || undefined; notes.push(`changed ${k}`); }
     }
     if (body.assignees) {
-      await assertAssignable(task.client, body.assignees);
+      await assertAssignable(req.user, task.client, body.assignees);
       task.assignees = body.assignees; notes.push('changed assignees');
       if (!body.assignees.some((a) => String(a) === String(task.owner))) task.owner = body.assignees[0];
     }
@@ -105,7 +114,7 @@ r.post('/templates', ah(async (req, res) => {
   const b = req.body || {};
   if (!b.title || !b.client || !b.frequency) throw new HttpError(400, 'Title, client and frequency are required');
   if (!(await canManageClient(req.user, b.client))) throw new HttpError(403, 'You can only schedule work for clients you manage');
-  await assertAssignable(b.client, b.assignees || []);
+  await assertAssignable(req.user, b.client, b.assignees || []);
   const tpl = await TaskTemplate.create({ ...b, team: b.team || undefined, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
   audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });

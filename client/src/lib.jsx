@@ -6,14 +6,20 @@ const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch {
 const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } };
 
 export async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', ...(getToken() && { authorization: `Bearer ${getToken()}` }) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
+  const offline = () => Object.assign(new Error('Can’t reach the server. Make sure the API server is running, then try again.'), { offline: true });
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(getToken() && { authorization: `Bearer ${getToken()}` }) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw offline(); }
+  const data = await res.json().catch(() => null);
+  // The dev proxy answers 5xx with no JSON body when the API server is down
+  if (!data && res.status >= 500) throw offline();
   if (res.status === 401 && path !== '/auth/login') { setToken(null); window.dispatchEvent(new Event('ka:logout')); }
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data?.error || 'Request failed'), { status: res.status });
   return Object.assign(data, { __status: res.status });
 }
 
@@ -38,12 +44,14 @@ export const useAuth = () => useContext(AuthCtx);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
+  const [offline, setOffline] = useState(false);
 
   useEffect(() => {
     const out = () => setUser(null);
     window.addEventListener('ka:logout', out);
-    if (getToken()) api('/auth/me').then((d) => setUser(d.user)).catch(() => {}).finally(() => setReady(true));
-    else setReady(true);
+    if (getToken()) {
+      api('/auth/me').then((d) => setUser(d.user)).catch((e) => setOffline(!!e.offline)).finally(() => setReady(true));
+    } else setReady(true);
     return () => window.removeEventListener('ka:logout', out);
   }, []);
 
@@ -56,7 +64,7 @@ export function AuthProvider({ children }) {
     super: user?.role === 'super_admin',
     manage: user?.role === 'super_admin' || user?.role === 'admin',
   };
-  return <AuthCtx.Provider value={{ user, ready, login, logout, can }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, ready, offline, login, logout, can }}>{children}</AuthCtx.Provider>;
 }
 
 /* ---------- Toast ---------- */

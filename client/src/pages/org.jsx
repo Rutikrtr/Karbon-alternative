@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Layers, Building2, Lock, CalendarCheck } from 'lucide-react';
+import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Layers, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskForm } from '../tasks.jsx';
@@ -13,6 +13,11 @@ export function Teams() {
   const toast = useToast();
   const [adding, setAdding] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const removeTeam = async (team) => {
+    if (!confirm(`Delete ${team.name}? Members leave the team; clients, tasks and history are kept.`)) return;
+    try { await api(`/teams/${team._id}`, { method: 'DELETE' }); toast(`${team.name} deleted`); reload(); } catch (e) { toast(e.message); }
+  };
   const remove = async (team, m) => {
     if (!confirm(`Remove ${m.name} from ${team.name}? Their other teams and client access are not affected.`)) return;
     try { await api(`/teams/${team._id}/members/${m._id}`, { method: 'DELETE' }); toast(`${m.name} removed from ${team.name}`); reload(); } catch (e) { toast(e.message); }
@@ -21,7 +26,7 @@ export function Teams() {
 
   return (
     <>
-      <PageHead title="Teams" subtitle="People can belong to several teams with one login. Client access is granted separately.">
+      <PageHead title="Teams" subtitle="Each team is run by one TL / manager. The TL manages the team’s clients and assigns its work.">
         {can.super && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New team</button>}
       </PageHead>
       {loading && !data ? <div className="card"><Skeleton /></div> : (
@@ -31,14 +36,19 @@ export function Teams() {
               <div style={{ height: 6, background: t.color }} />
               <div className="card-head">
                 <div><h3>{t.name}</h3><p className="small muted">{t.description}</p></div>
-                {t.canManage && <button className="btn btn-tonal icon-btn" aria-label={`Add member to ${t.name}`} onClick={() => setAdding(t)}><UserPlus size={18} /></button>}
+                <div className="row" style={{ gap: 4 }}>
+                  {t.canManage && <button className="btn btn-tonal icon-btn" aria-label={`Add member to ${t.name}`} title="Add member" onClick={() => setAdding(t)}><UserPlus size={18} /></button>}
+                  {can.super && <button className="btn btn-ghost icon-btn" aria-label={`Edit ${t.name}`} title="Edit team / change TL" onClick={() => setEditing(t)}><Pencil size={16} /></button>}
+                  {can.super && <button className="btn btn-ghost icon-btn" aria-label={`Delete ${t.name}`} title="Delete team" onClick={() => removeTeam(t)}><Trash2 size={16} /></button>}
+                </div>
               </div>
+              {!t.members.some((m) => m.teamRole === 'lead') && <div className="form-note" style={{ margin: 12, background: 'var(--warning-soft)', color: 'var(--warning)' }}>No TL yet. {can.super ? 'Click the pencil to choose one.' : 'Ask a Super Admin to choose one.'}</div>}
               <div className="list">
                 {[...t.members].sort((a, b) => (a.teamRole === 'lead' ? -1 : b.teamRole === 'lead' ? 1 : 0)).map((m) => (
                   <div key={m._id} className="list-item" style={{ cursor: 'default' }}>
                     <Avatar name={m.name} size="sm" />
                     <div className="li-main"><div className="title">{m.name}</div><div className="li-meta">{m.title}</div></div>
-                    {m.teamRole === 'lead' && <Badge cls="b-warning"><Crown size={12} />Lead</Badge>}
+                    {m.teamRole === 'lead' && <Badge cls="b-warning"><Crown size={12} />TL</Badge>}
                     {t.canManage && m.teamRole !== 'lead' && <button className="btn btn-ghost icon-btn" aria-label={`Remove ${m.name}`} onClick={() => remove(t, m)}><X size={16} /></button>}
                   </div>
                 ))}
@@ -48,41 +58,50 @@ export function Teams() {
         </div>
       )}
       {adding && <AddMember team={adding} users={users.data || []} onClose={() => setAdding(null)} onSaved={reload} />}
-      {creating && <NewTeam onClose={() => setCreating(false)} onSaved={reload} />}
+      {creating && <TeamForm users={users.data || []} onClose={() => setCreating(false)} onSaved={reload} />}
+      {editing && <TeamForm team={editing} users={users.data || []} onClose={() => setEditing(null)} onSaved={reload} />}
     </>
   );
 }
 
 function AddMember({ team, users, onClose, onSaved }) {
-  const { can } = useAuth();
   const [userId, setUserId] = useState('');
-  const [teamRole, setTeamRole] = useState('member');
   const [error, setError] = useState(null);
   const ids = new Set(team.members.map((m) => m._id));
-  const submit = async (e) => { e.preventDefault(); try { await api(`/teams/${team._id}/members`, { method: 'POST', body: { userId, teamRole } }); onSaved(); onClose(); } catch (err) { setError(err); } };
+  const submit = async (e) => { e.preventDefault(); try { await api(`/teams/${team._id}/members`, { method: 'POST', body: { userId } }); onSaved(); onClose(); } catch (err) { setError(err); } };
   return (
     <Modal title={`Add to ${team.name}`} onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="am" disabled={!userId}>Add</button></>}>
       <form id="am" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
         <Field label="Person"><select className="select" value={userId} onChange={(e) => setUserId(e.target.value)}><option value="">Select…</option>
-          {users.filter((u) => !ids.has(u._id) && u.active && u.role !== 'super_admin').map((u) => <option key={u._id} value={u._id}>{u.name} · {ROLE_LABEL[u.role]}</option>)}</select></Field>
-        {can.super && <Field label="Role in team"><select className="select" value={teamRole} onChange={(e) => setTeamRole(e.target.value)}><option value="member">Member</option><option value="lead">Lead (TL)</option></select></Field>}
-        <div className="form-note">Adding someone to a team does not give them access to the team’s clients.</div>
+          {users.filter((u) => !ids.has(u._id) && u.active && u.role === 'employee').map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}</select></Field>
+        <div className="form-note">Members get access to a client automatically when their TL assigns them work for it.</div>
       </form>
     </Modal>
   );
 }
 
-function NewTeam({ onClose, onSaved }) {
-  const [f, setF] = useState({ name: '', description: '', color: '#2f9e44' });
+function TeamForm({ team, users, onClose, onSaved }) {
+  const currentLead = team?.members.find((m) => m.teamRole === 'lead');
+  const [f, setF] = useState({ name: team?.name || '', description: team?.description || '', color: team?.color || '#2f9e44', leadId: currentLead?._id || '' });
   const [error, setError] = useState(null);
-  const submit = async (e) => { e.preventDefault(); try { await api('/teams', { method: 'POST', body: f }); onSaved(); onClose(); } catch (err) { setError(err); } };
+  const admins = users.filter((u) => u.role === 'admin' && u.active);
+  const submit = async (e) => {
+    e.preventDefault();
+    try { await api(team ? `/teams/${team._id}` : '/teams', { method: team ? 'PATCH' : 'POST', body: f }); onSaved(); onClose(); } catch (err) { setError(err); }
+  };
   return (
-    <Modal title="New team" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="nt" disabled={!f.name}>Create</button></>}>
+    <Modal title={team ? `Edit ${team.name}` : 'New team'} onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="nt" disabled={!f.name || !f.leadId}>{team ? 'Save' : 'Create team'}</button></>}>
       <form id="nt" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
-        <Field label="Name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
-        <Field label="Description"><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
+        <Field label="Team name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+        <Field label="TL / Manager" hint={admins.length ? 'One TL runs each team and manages all of its clients.' : 'First add a person with the Admin / TL role on the People page.'}>
+          <select className="select" value={f.leadId} onChange={(e) => setF({ ...f, leadId: e.target.value })} required>
+            <option value="">Choose a TL…</option>
+            {admins.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Description"><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="e.g. Bookkeeping & bills" /></Field>
         <Field label="Colour"><input type="color" value={f.color} onChange={(e) => setF({ ...f, color: e.target.value })} style={{ width: 64, height: 40, border: 0, background: 'none' }} /></Field>
       </form>
     </Modal>
@@ -97,6 +116,10 @@ export function People() {
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const update = async (u, body) => { try { await api(`/users/${u._id}`, { method: 'PATCH', body }); toast('Saved'); reload(); } catch (e) { toast(e.message); } };
+  const remove = async (u) => {
+    if (!confirm(`Remove ${u.name}? They can no longer sign in and lose all team and client access. Their name stays on past tasks.`)) return;
+    try { await api(`/users/${u._id}`, { method: 'DELETE' }); toast(`${u.name} removed`); reload(); } catch (e) { toast(e.message); }
+  };
   return (
     <>
       <PageHead title="People" subtitle="Everyone in the practice. One account per person, however many teams they work in.">
@@ -105,16 +128,17 @@ export function People() {
       <div className="card" style={{ overflow: 'hidden' }}>
         {loading && !data ? <Skeleton /> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Status</th></tr></thead>
+            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Status</th><th /></tr></thead>
             <tbody>{data.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div></div></div></td>
                 <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
-                <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <Crown size={12} />}</span>)}</div></td>
+                <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <><Crown size={12} />TL</>}</span>)}</div></td>
                 <td>{u._id === me._id ? <Badge cls="b-primary">You</Badge> : (
                   <button className={`btn btn-sm ${u.active ? 'btn-outline' : 'btn-tonal'}`} onClick={() => update(u, { active: !u.active })}>{u.active ? 'Deactivate' : 'Reactivate'}</button>
                 )}</td>
+                <td style={{ textAlign: 'right' }}>{u._id !== me._id && <button className="btn btn-danger btn-sm" onClick={() => remove(u)}><Trash2 size={14} />Remove</button>}</td>
               </tr>
             ))}</tbody>
           </table></div>
@@ -259,7 +283,7 @@ const DEMO = [
 ];
 
 export function Login() {
-  const { login } = useAuth();
+  const { login, offline } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -279,7 +303,7 @@ export function Login() {
         </div>
         <div className="hero-points">
           <div><Users size={20} />One login across all your teams</div>
-          <div><Lock size={20} />Client access is granted explicitly, never by team alone</div>
+          <div><Lock size={20} />Each team is run by its own TL / manager</div>
           <div><Repeat size={20} />Recurring work with SOPs and checklists</div>
         </div>
       </section>
@@ -287,7 +311,7 @@ export function Login() {
         <div className="login-card">
           <div><h1>Sign in</h1><p className="muted" style={{ marginTop: 4 }}>Use your work account.</p></div>
           <form className="stack" style={{ gap: 16 }} onSubmit={go}>
-            <ErrorBox error={error} />
+            <ErrorBox error={error || (offline ? new Error('Can’t reach the server. Make sure the API server is running, then reload.') : null)} />
             <Field label="Email"><input className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
             <Field label="Password"><input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
             <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>{busy ? 'Signing in…' : 'Sign in'}</button>

@@ -42,19 +42,22 @@ Set `SEED_DEMO=true` to fill an empty database with demo data. Demo accounts (pa
 | Role | Sees |
 |---|---|
 | Super Admin | Every team, client, person and task |
-| Admin / TL | Clients they are assigned to manage, and all tasks on them |
-| Employee | Only clients they have an **active explicit permission** for, and tasks assigned to them |
+| Admin / TL | The clients of the team they lead (plus any client they're added to as an extra manager), and all work on them |
+| Employee | Only clients they have access to, and the tasks assigned to them |
 
-Rules (all enforced server-side in `server/src/services/access.js`):
+How it works (enforced server-side in `server/src/services/access.js`):
 
-- Team membership **never** grants client access. Employee 2 in Team A + B sees only Hamilton + Client D.
-- One login per person, any number of teams; removing someone from one team leaves the others untouched.
-- One client can be managed by several admins; reassignment ends an assignment row instead of deleting it, so history stays.
-- Client access can be temporary (`expiresAt`).
-- An admin can grant access directly only to people in a team they lead; anyone else becomes an **access request** a Super Admin approves.
-- Tasks can have several assignees with one **owner**; they can only be assigned to people who can see the client.
-- Recurring templates (daily / weekly / monthly) generate tasks 14 days ahead, independent of whether the previous one was finished.
-- Every login, access change and task update is written to `audit_logs`.
+- **Each team has exactly one TL / manager**, chosen when the team is created (changeable by a Super Admin).
+- A client is assigned to a team, so the team's TL manages it automatically.
+- When a TL assigns a task to someone in their team, that person gets access to the client automatically.
+  Being in a team alone does not show someone every client of the team.
+- The TL's home page shows **Team work**: every task for their clients, who it is assigned to, checklist progress,
+  and who completed it. Completed tasks stay visible for 7 days (and always under the "Completed" filter).
+- Giving access to someone outside your own team becomes an **access request** that a Super Admin approves.
+- Access can be temporary (`expiresAt`).
+- Removing a person closes their account and removes their team and client access; their name stays on past tasks.
+  A TL can't be removed until their team has a new TL.
+- The activity log records logins, access changes and task updates, and **entries are deleted automatically after 30 days**.
 
 ## Collections
 

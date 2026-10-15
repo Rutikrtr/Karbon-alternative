@@ -17,12 +17,22 @@ export const activePermissionFilter = () => ({
   $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
 });
 
-/** Client ids this admin manages (assigned directly as admin). */
+/**
+ * Client ids this admin manages: clients of the team(s) they lead (each team has one TL),
+ * plus any client they were added to directly as an extra manager.
+ */
 export async function managedClientIds(user) {
   if (isSuper(user)) return null; // null = unrestricted
   if (user.role !== 'admin') return [];
-  const rows = await ClientAssignment.find({ admin: user._id, endedAt: null }).select('client');
+  const led = await ledTeamIds(user);
+  const rows = await ClientAssignment.find({ endedAt: null, $or: [{ admin: user._id }, { team: { $in: led } }] }).select('client');
   return [...new Set(rows.map((r) => String(r.client)))];
+}
+
+/** The TL of each team, keyed by team id. */
+export async function teamLeads(teamIds) {
+  const rows = await TeamMembership.find({ team: { $in: teamIds }, teamRole: 'lead', removedAt: null }).populate('user', 'name email');
+  return Object.fromEntries(rows.filter((r) => r.user).map((r) => [String(r.team), r.user]));
 }
 
 /** Client ids the user may see. null means "all". */
